@@ -1,0 +1,77 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Update and install base tools
+RUN apt-get update && apt-get install -y \
+    zsh git tmux neovim curl wget unzip fzf ranger \
+    build-essential cmake gdb \
+    python3 python3-pip python3-venv \
+    openjdk-17-jdk \
+    nodejs npm \
+    rustc cargo \
+    openssh-server \
+    software-properties-common gnupg lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Sapling (Git-compatible VCS, command = sl)
+RUN add-apt-repository ppa:martinvonz/sapling -y && \
+    apt-get update && apt-get install -y sapling && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI (gh)
+RUN type -p curl >/dev/null || apt-get install -y curl && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
+        tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
+        tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    apt-get update && apt-get install -y gh
+
+# Install GitLab CLI (glab)
+RUN curl -s https://raw.githubusercontent.com/profclems/glab/trunk/scripts/install.sh | bash
+
+# Install z (directory jumper)
+RUN curl -sS https://raw.githubusercontent.com/rupa/z/master/z.sh -o /usr/share/z.sh \
+    && echo 'source /usr/share/z.sh' >> /etc/zsh/zshrc
+
+# Set zsh as default shell
+RUN chsh -s /usr/bin/zsh
+
+# Setup SSH
+RUN mkdir /var/run/sshd
+EXPOSE 22
+
+# Install LazyVim starter config
+RUN git clone https://github.com/LazyVim/starter ~/.config/nvim && \
+    cd ~/.config/nvim && rm -rf .git
+
+# Install AI plugins for LazyVim
+RUN mkdir -p ~/.config/nvim/lua/plugins && \
+    echo 'return {\n' \
+         '  { "jackMort/ChatGPT.nvim", dependencies = { "nvim-lua/plenary.nvim", "MunifTanjim/nui.nvim" } },\n' \
+         '  { "zbirenbaum/copilot.lua" },\n' \
+         '  { "zbirenbaum/copilot-cmp" }\n' \
+         '}' > ~/.config/nvim/lua/plugins/ai.lua
+
+# Reinstall Node.js LTS (needed for some nvim plugins)
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
+    apt-get install -y nodejs
+
+# Setup SSH user
+RUN useradd -m -s /bin/zsh dev && echo "dev:dev" | chpasswd && adduser dev sudo
+
+USER dev
+WORKDIR /home/dev
+
+# Create SSH folder for mounting host keys
+RUN mkdir -p /home/dev/.ssh && chmod 700 /home/dev/.ssh
+
+# Configure Git + Sapling with same identity
+RUN git config --global user.name "Your Name" && \
+    git config --global user.email "your@email.com" && \
+    sl config --global user.name "Your Name" && \
+    sl config --global user.email "your@email.com"
+
+# Entry point: sshd
+CMD ["/usr/sbin/sshd", "-D"]
